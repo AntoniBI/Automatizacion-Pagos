@@ -59,5 +59,52 @@ const API = (() => {
 
     process: (payload) => request("POST", "/api/process", payload),
     exportUrl: (kind) => `/api/export/${kind}`,
+
+    chequesPreview: (file) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      return request("POST", "/api/cheques/preview", fd, true);
+    },
+    chequesPdf: async (file, fecha, serie, calibration, incluirDorso) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("fecha", fecha);
+      if (serie) fd.append("serie_inicial", serie);
+      if (calibration) fd.append("calibration", JSON.stringify(calibration));
+      fd.append("incluir_dorso", incluirDorso ? "true" : "false");
+      const res = await fetch("/api/cheques/pdf", { method: "POST", body: fd, credentials: "same-origin" });
+      if (!res.ok) {
+        let detail = `Error ${res.status}`;
+        try { detail = (await res.json()).detail || detail; } catch (_) {}
+        throw new Error(detail);
+      }
+      return res.blob();
+    },
+    chequesCalibDefaults: () => request("GET", "/api/cheques/calibration-defaults"),
+    chequesEjemplo: async (payload) => {
+      const res = await fetch("/api/cheques/ejemplo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload || {}),
+        credentials: "same-origin",
+      });
+      if (!res.ok) {
+        let detail = `Error ${res.status}`;
+        try { detail = (await res.json()).detail || detail; } catch (_) {}
+        throw new Error(detail);
+      }
+      return res.blob();
+    },
+    chequesCalibPdf: async (calibration, incluirDorso) => {
+      const body = { ...(calibration || {}), incluir_dorso: !!incluirDorso };
+      const res = await fetch("/api/cheques/calibracion", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        credentials: "same-origin",
+      });
+      if (!res.ok) throw new Error(`Error ${res.status}`);
+      return res.blob();
+    },
   };
 })();

@@ -12,13 +12,23 @@ import uuid
 from io import BytesIO
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, File, Request, Response, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, Request, Response, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .core import MusicianPaymentSystem
 from .excel_export import create_excel_export, create_simple_excel_export
+from datetime import date
+
+from .cheques import (
+    ChequeError,
+    generate_calibration_pdf,
+    generate_cheques_pdf,
+    get_default_calibration,
+    get_sample_items,
+    read_cheque_amounts,
+)
 
 # Rutas del frontend (resueltas respecto a la raíz del proyecto)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -444,6 +454,105 @@ def api_export(request: Request, kind: str):
         BytesIO(buffer.getvalue()),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ----------------------------------------------------------------------
+# Cheques (PDF) — módulo independiente: lee un Excel ya editado y genera el PDF
+# ----------------------------------------------------------------------
+@app.post("/api/cheques/preview")
+async def api_cheques_preview(file: UploadFile = File(...)):
+    contents = await file.read()
+    try:
+        items, info = read_cheque_amounts(contents)
+    except ChequeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {
+        "items": items,
+        "info": info,
+        "total": sum(i["importe"] for i in items),
+        "count": len(items),
+    }
+
+
+def _parse_calibration(raw: str | None):
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+
+
+@app.post("/api/cheques/pdf")
+async def api_cheques_pdf(
+    file: UploadFile = File(...),
+    fecha: str = Form(...),
+    serie_inicial: str | None = Form(None),
+    calibration: str | None = Form(None),
+    incluir_dorso: bool = Form(False),
+):
+    contents = await file.read()
+    try:
+        items, _ = read_cheque_amounts(contents)
+        pdf = generate_cheques_pdf(
+            items, fecha, serie_inicial or None, _parse_calibration(calibration),
+            incluir_dorso=incluir_dorso,
+        )
+    except ChequeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return StreamingResponse(
+        BytesIO(pdf),
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="cheques.pdf"'},
+    )
+
+
+@app.get("/api/cheques/calibration-defaults")
+def api_cheques_calibration_defaults():
+    return get_default_calibration()
+
+
+@app.post("/api/cheques/ejemplo")
+async def api_cheques_ejemplo(request: Request):
+    """PDF de cheques con datos simulados, para probar la calibración."""
+    try:
+        data = await request.json()
+    except (ValueError, TypeError):
+        data = {}
+    fecha = data.get("fecha") or date.today().isoformat()
+    try:
+        pdf = generate_cheques_pdf(
+            get_sample_items(),
+            fecha,
+            data.get("serie_inicial") or None,
+            data.get("calibration"),
+            incluir_dorso=bool(data.get("incluir_dorso")),
+        )
+    except ChequeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return StreamingResponse(
+        BytesIO(pdf),
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="cheques_ejemplo.pdf"'},
+    )
+
+
+@app.post("/api/cheques/calibracion")
+async def api_cheques_calibracion(request: Request):
+    raw = await request.body()
+    calibration = None
+    if raw:
+        try:
+            calibration = json.loads(raw)
+        except (ValueError, TypeError):
+            calibration = None
+    incluir_dorso = bool(calibration.get("incluir_dorso")) if calibration else False
+    pdf = generate_calibration_pdf(calibration, incluir_dorso=incluir_dorso)
+    return StreamingResponse(
+        BytesIO(pdf),
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="cheques_calibracion.pdf"'},
     )
 
 
