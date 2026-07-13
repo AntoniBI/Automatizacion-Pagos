@@ -434,15 +434,20 @@ def api_process(request: Request, payload: ProcessPayload):
 
 
 @app.get("/api/export/{kind}")
-def api_export(request: Request, kind: str):
+def api_export(request: Request, kind: str, xec_start: int | None = None, xec_dir: str = "asc"):
     system = require_session(request)
     require_data(system)
     results = system.last_results
     if results is None:
         raise HTTPException(status_code=409, detail="Procesa los datos antes de descargar.")
 
+    if xec_start is not None and xec_start < 0:
+        raise HTTPException(status_code=422, detail="El número de cheque debe ser mayor o igual que 0.")
+    if xec_dir not in ("asc", "desc"):
+        raise HTTPException(status_code=422, detail="Dirección de numeración desconocida.")
+
     if kind == "full":
-        buffer = create_excel_export(results, system, warnings=[])
+        buffer = create_excel_export(results, system, warnings=[], xec_start=xec_start, xec_dir=xec_dir)
         filename = "cobro_musical_resultados.xlsx"
     elif kind == "basic":
         buffer = create_simple_excel_export(results)

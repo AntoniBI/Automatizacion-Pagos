@@ -58,7 +58,10 @@ const API = (() => {
     eventAnalysis: (event) => request("GET", `/api/events/analysis?event=${encodeURIComponent(event)}`),
 
     process: (payload) => request("POST", "/api/process", payload),
-    exportUrl: (kind) => `/api/export/${kind}`,
+    exportUrl: (kind, params) => {
+      const qs = params ? new URLSearchParams(params).toString() : "";
+      return `/api/export/${kind}${qs ? `?${qs}` : ""}`;
+    },
 
     chequesPreview: (file) => {
       const fd = new FormData();

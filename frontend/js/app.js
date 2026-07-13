@@ -622,7 +622,18 @@ function renderProcessResults(res) {
 }
 
 function download(kind) {
-  window.location.href = API.exportUrl(kind);
+  let params = null;
+  if (kind === "full") {
+    const start = $("#xec-start").value.trim();
+    if (start !== "") {
+      if (!/^\d+$/.test(start)) {
+        toast("El primer Nº de cheque debe ser un número entero positivo.", "error");
+        return;
+      }
+      params = { xec_start: start, xec_dir: $("#xec-dir").value };
+    }
+  }
+  window.location.href = API.exportUrl(kind, params);
 }
 
 // ============================================================

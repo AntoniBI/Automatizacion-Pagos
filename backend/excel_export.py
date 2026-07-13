@@ -12,8 +12,13 @@ from io import BytesIO
 import pandas as pd
 
 
-def create_excel_export(results, system, warnings=None):
-    """Crea el Excel completo con todas las hojas y formato profesional."""
+def create_excel_export(results, system, warnings=None, xec_start=None, xec_dir="asc"):
+    """Crea el Excel completo con todas las hojas y formato profesional.
+
+    xec_start/xec_dir controlan la columna "Nª Xec" de Resumen_Musicos:
+    numeración correlativa desde xec_start (ascendente o descendente), o
+    columna vacía si xec_start es None.
+    """
     if warnings is None:
         warnings = []
     try:
@@ -46,6 +51,12 @@ def create_excel_export(results, system, warnings=None):
                     musician_summary['Penalizacion_Total'] = musician_summary['Penalizacion_Total'].round(2)
                 if 'Importe_Final' in musician_summary.columns:
                     musician_summary['Importe_Final'] = musician_summary['Importe_Final'].round(2)
+
+                if xec_start is not None:
+                    step = -1 if xec_dir == 'desc' else 1
+                    musician_summary['Nª Xec'] = [int(xec_start) + i * step for i in range(len(musician_summary))]
+                else:
+                    musician_summary['Nª Xec'] = None
 
                 musician_summary.to_excel(writer, sheet_name='Resumen_Musicos', index=False)
 

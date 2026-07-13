@@ -305,6 +305,17 @@
 
           <div class="card">
             <h3><svg class="ico"><use href="#i-download"></use></svg> Descargar Resultados</h3>
+            <div class="form-row">
+              <label>Primer Nº de cheque <span class="muted">(opcional, columna "Nª Xec" en Resumen_Musicos)</span>
+                <input type="number" id="xec-start" min="0" step="1" placeholder="Ej. 1250" />
+              </label>
+              <label>Numeración
+                <select id="xec-dir">
+                  <option value="asc" selected>Ascendente</option>
+                  <option value="desc">Descendente</option>
+                </select>
+              </label>
+            </div>
             <div class="btn-row">
               <button id="btn-export-full" class="btn btn-primary"><svg class="ico"><use href="#i-download"></use></svg> Excel Completo</button>
               <button id="btn-export-basic" class="btn btn-ghost"><svg class="ico"><use href="#i-file"></use></svg> Excel Básico</button>
