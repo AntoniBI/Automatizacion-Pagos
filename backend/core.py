@@ -17,10 +17,52 @@ Las fórmulas de reparto, penalizaciones, retención de banda y los pasos de
 `process_payments` son idénticas al original.
 """
 
+import re
 import unicodedata
 
 import pandas as pd
 import numpy as np
+
+# pandas renombra las columnas repetidas de una hoja como "Acto.1", "Acto.2"…
+_PANDAS_DUPE_SUFFIX = re.compile(r"^(.*)\.(\d+)$")
+
+
+def _undo_pandas_dupe_suffix(names):
+    """Deshace el sufijo que pandas añade a las columnas repetidas.
+
+    Solo se quita cuando el nombre base también está presente, para no tocar
+    actos que legítimamente terminen en ".1".
+    """
+    originales = set(names)
+    limpios = []
+    for name in names:
+        match = _PANDAS_DUPE_SUFFIX.match(name) if isinstance(name, str) else None
+        limpios.append(match.group(1) if match and match.group(1) in originales else name)
+    return limpios
+
+
+def _make_names_unique(names):
+    """Desambigua nombres repetidos: "Acto", "Acto (2)", "Acto (3)"…
+
+    Devuelve (nombres_unicos, renombrados) respetando el orden de aparición.
+    """
+    ocupados = set()
+    unicos = []
+    renombrados = []
+    for name in names:
+        if name not in ocupados:
+            ocupados.add(name)
+            unicos.append(name)
+            continue
+        n = 2
+        nuevo = f"{name} ({n})"
+        while nuevo in ocupados:
+            n += 1
+            nuevo = f"{name} ({n})"
+        ocupados.add(nuevo)
+        unicos.append(nuevo)
+        renombrados.append((name, nuevo))
+    return unicos, renombrados
 
 
 def _normalize_col(name):
@@ -200,6 +242,36 @@ class MusicianPaymentSystem:
 
             if 'ACTES' in self.configuracion_df.columns:
                 self.configuracion_df['ACTES'] = self.configuracion_df['ACTES'].astype(str).str.strip()
+
+            # 'A REPARTIR' puede venir como enteros; igualar presupuestos escribe
+            # importes con decimales, así que se fuerza a float desde el principio.
+            if 'A REPARTIR' in self.presupuesto_df.columns:
+                self.presupuesto_df['A REPARTIR'] = pd.to_numeric(
+                    self.presupuesto_df['A REPARTIR'], errors='coerce'
+                ).fillna(0).astype(float)
+
+            # Nombres de acto: los tres sitios donde aparecen (cabeceras de
+            # Asistencia, ACTES de Presupuesto y ACTES de Configuración) deben
+            # coincidir. Se recortan espacios sobrantes y se desambiguan los
+            # nombres repetidos por orden de aparición, que es como se
+            # corresponden entre hojas.
+            columnas = [c.strip() if isinstance(c, str) else c
+                        for c in self.asistencia_df.columns]
+            columnas = _undo_pandas_dupe_suffix(columnas)
+            columnas, renombrados = _make_names_unique(columnas)
+            self.asistencia_df.columns = columnas
+
+            for df in (self.presupuesto_df, self.configuracion_df):
+                if 'ACTES' in df.columns:
+                    unicos, extra = _make_names_unique(list(df['ACTES']))
+                    df['ACTES'] = unicos
+                    renombrados += extra
+
+            if renombrados:
+                detalle = ", ".join(f"{a} -> {b}" for a, b in dict(renombrados).items())
+                self._msg("warning",
+                          "Actos con el mismo nombre renombrados por orden de "
+                          f"aparición: {detalle}")
 
             event_columns = self.get_events_list()
             for event in event_columns:
