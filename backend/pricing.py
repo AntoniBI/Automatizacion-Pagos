@@ -184,3 +184,150 @@ def calcular_presupuestos_iguales(
     presupuestos = {evento: valor_unitario * masas[evento] for evento in eventos}
 
     return presupuestos, valor_unitario
+
+
+def calcular_ajuste_conjunto(
+    df_asistencia,
+    df_ponderaciones,
+    eventos,
+    presupuesto_total,
+    factor_neto=None,
+    w_C=0.700,
+    w_D=0.600,
+    w_E=0.500,
+    categoria_col="Categoria",
+    decimales=4,
+):
+    """Ajusta a la vez las ponderaciones y los presupuestos de varios actos.
+
+    Encadenar "ponderación A automática" + "igualar presupuestos" deja a la
+    categoría A cobrando distinto en cada acto: como A se despeja por acto para
+    repartir el presupuesto entero, absorbe la diferencia de composición (un acto
+    con pocos músicos A le da a cada uno una ponderación mayor). B, C, D y E sí
+    coinciden porque son las mismas en todos los actos.
+
+    Aquí se resuelven las dos cosas a la vez:
+
+    1. Se calcula UNA ponderación base común a todos los actos seleccionados
+       (C, D, E fijas; B la media ponderada por asistentes; A despejada sobre el
+       conjunto para que la media de ponderaciones por asistente sea 1).
+    2. Cada acto escala ese bloque completo por k = N_asistentes / masa_base, de
+       forma que reparte exactamente su presupuesto (diferencia ≥ 0).
+    3. El presupuesto de cada acto se fija en proporción a su masa base, que es
+       justo lo que compensa el escalado.
+
+    El resultado: (neto/N)·ponderación es idéntico en todos los actos para cada
+    categoría — todos cobran lo mismo en todos los actos — sin dejar dinero sin
+    repartir y manteniendo la misma proporción entre categorías.
+
+    Parámetros:
+    - factor_neto: {evento: 1 - retencion/100}; el reparto iguala el NETO, así
+      que un acto con retención necesita un presupuesto bruto mayor.
+    - presupuesto_total: total bruto a repartir entre los actos seleccionados.
+
+    Retorna (resultados, saltados, resumen).
+    """
+    categorias = ['A', 'B', 'C', 'D', 'E']
+    factor = 10 ** decimales
+    factor_neto = factor_neto or {}
+
+    validos = []
+    saltados = []
+    for evento in eventos:
+        if evento not in df_ponderaciones.index:
+            saltados.append({"Acto": evento, "Motivo": "Evento no encontrado en ponderaciones"})
+            continue
+        current_row = df_ponderaciones.loc[evento]
+        if getattr(current_row, "ndim", 1) > 1:
+            current_row = current_row.iloc[0]
+        if all(float(current_row.get(c, 0) or 0) == 0 for c in categorias):
+            saltados.append({"Acto": evento, "Motivo": "Acto oficial (todas las ponderaciones a 0)"})
+            continue
+        if evento not in df_asistencia.columns:
+            saltados.append({"Acto": evento, "Motivo": "Evento no encontrado en asistencia"})
+            continue
+
+        attendees = df_asistencia[df_asistencia[evento] == 1]
+        if len(attendees) == 0:
+            saltados.append({"Acto": evento, "Motivo": "Sin asistentes"})
+            continue
+
+        cat_counts = attendees[categoria_col].value_counts().to_dict()
+        n = {c: int(cat_counts.get(c, 0)) for c in categorias}
+        if n['A'] == 0:
+            saltados.append({"Acto": evento, "Motivo": "No hay asistentes de categoría A"})
+            continue
+
+        validos.append({
+            "evento": evento,
+            "n": n,
+            # N incluye a TODOS los asistentes, igual que la fórmula de reparto,
+            # que divide entre len(asistentes) aunque haya categorías fuera de A-E.
+            "N": len(attendees),
+            "w_B_actual": float(current_row['B']),
+            "A_anterior": float(current_row['A']),
+        })
+
+    if not validos:
+        raise ValueError("Ninguno de los actos seleccionados se puede ajustar.")
+
+    # 1) Bloque base común: B media ponderada por músicos B; C, D, E fijas.
+    total_nB = sum(v["n"]['B'] for v in validos)
+    if total_nB:
+        w_B_base = sum(v["n"]['B'] * v["w_B_actual"] for v in validos) / total_nB
+    else:
+        w_B_base = sum(v["w_B_actual"] for v in validos) / len(validos)
+
+    fijas = {'B': w_B_base, 'C': w_C, 'D': w_D, 'E': w_E}
+    N_pool = sum(v["N"] for v in validos)
+    nA_pool = sum(v["n"]['A'] for v in validos)
+    resto = sum(v["n"][c] * w for v in validos for c, w in fijas.items())
+    w_A_base = (N_pool - resto) / nA_pool
+    if w_A_base <= 0:
+        raise ValueError(
+            "La ponderación A común saldría negativa: revisa las categorías de los actos seleccionados."
+        )
+
+    base = {'A': w_A_base, **fijas}
+
+    # 2) Escalado por acto + 3) presupuesto proporcional a la masa base
+    for v in validos:
+        v["masa_base"] = sum(v["n"][c] * base[c] for c in categorias)
+        v["k"] = v["N"] / v["masa_base"]
+        v["factor_neto"] = float(factor_neto.get(v["evento"], 1.0)) or 1.0
+
+    denominador = sum(v["masa_base"] / v["factor_neto"] for v in validos)
+    valor_unitario = presupuesto_total / denominador
+
+    resultados = []
+    for v in validos:
+        # Truncar hacia abajo para que la diferencia por acto nunca sea negativa
+        pesos = {c: math.floor(base[c] * v["k"] * factor) / factor for c in categorias}
+        neto = valor_unitario * v["masa_base"]
+        bruto = neto / v["factor_neto"]
+        masa_final = sum(v["n"][c] * pesos[c] for c in categorias)
+        repartido = (neto / v["N"]) * masa_final
+        resultados.append({
+            "Acto": v["evento"],
+            "Asistentes": v["N"],
+            "A anterior": v["A_anterior"],
+            **{f"{c} nuevo": pesos[c] for c in categorias},
+            "pesos": pesos,
+            "Presupuesto nuevo": bruto,
+            "Neto (€)": neto,
+            "Total Repartido (€)": repartido,
+            "Diff (€)": neto - repartido,
+            **{f"Cobra {c}": (neto / v["N"]) * pesos[c] for c in categorias},
+        })
+
+    resumen = {
+        "A_base": w_A_base,
+        "B_base": w_B_base,
+        "C_base": w_C,
+        "D_base": w_D,
+        "E_base": w_E,
+        "valor_unitario": valor_unitario,
+        "actos": len(validos),
+        "pagos": {c: valor_unitario * base[c] for c in categorias},
+    }
+    return resultados, saltados, resumen

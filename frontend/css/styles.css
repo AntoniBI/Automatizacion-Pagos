@@ -285,7 +285,10 @@ input[type="number"] {
 .card h3 { margin: 0 0 16px; font-size: 15.5px; font-weight: 700; letter-spacing: -0.02em; display: flex; align-items: center; gap: 9px; }
 .card h3 .ico { color: var(--brand); width: 19px; height: 19px; }
 .card h4 { margin: 18px 0 10px; font-size: 13.5px; color: var(--text-dim); font-weight: 600; }
-.card-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+/* minmax(0,1fr): sin esto una tabla ancha (p. ej. la lista de músicos de
+   Análisis) estira su columna y desborda la página en horizontal. */
+.card-grid-2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; }
+.card-grid-2 > * { min-width: 0; }
 .chart { width: 100%; min-height: 320px; }
 
 /* ============================================================
@@ -303,6 +306,7 @@ input[type="number"] {
 .data-table tbody tr:last-child { border-bottom: none; }
 .data-table tbody tr:hover { background: var(--brand-soft); }
 .data-table td.num, .data-table th.num { text-align: right; }
+.data-table td.wrap { white-space: normal; }
 .data-table .neg { color: var(--danger); font-weight: 600; }
 .data-table .pos { color: var(--success); font-weight: 600; }
 .data-table.editable td input {

@@ -96,6 +96,12 @@ class DefaultBudgetPayload(BaseModel):
     eventos: list
 
 
+class JointAdjustPayload(BaseModel):
+    eventos: list
+    presupuesto_total: float
+    decimales: int = 4
+
+
 class RetentionPayload(BaseModel):
     rows: list
 
@@ -289,6 +295,35 @@ def api_equalize(request: Request, payload: EqualizePayload):
     return {
         "changes_log": changes_log,
         "valor_unitario": valor_unitario,
+        "preview": preview_payload(system),
+    }
+
+
+@app.post("/api/weights/joint-adjust")
+def api_joint_adjust(request: Request, payload: JointAdjustPayload):
+    """Ajusta ponderaciones y presupuestos de varios actos a la vez.
+
+    Encadenar auto-A + igualar presupuestos deja a la categoría A cobrando
+    distinto en cada acto; esto resuelve las dos cosas juntas.
+    """
+    system = require_session(request)
+    require_data(system)
+    if not payload.eventos:
+        raise HTTPException(status_code=400, detail="Selecciona al menos un acto.")
+    if payload.presupuesto_total <= 0:
+        raise HTTPException(status_code=400, detail="El presupuesto total debe ser mayor que 0.")
+    try:
+        cambios, saltados, resumen = system.apply_ajuste_conjunto(
+            payload.eventos, payload.presupuesto_total, payload.decimales
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {
+        "cambios": cambios,
+        "saltados": saltados,
+        "resumen": resumen,
+        "decimales": payload.decimales,
+        "rows": weights_to_rows(system.editing_weights),
         "preview": preview_payload(system),
     }
 

@@ -17,6 +17,14 @@ const PLOTLY_LAYOUT = {
 };
 const PLOTLY_CONFIG = { responsive: true, displayModeBar: false };
 
+// Plotly ESCRIBE en el objeto de layout que recibe (type, range, autorange…).
+// Compartir el mismo objeto entre gráficos contagia el eje de uno al siguiente:
+// el gráfico de presupuestos dejaba xaxis.type="linear" grabado y las barras por
+// categoría (A–E) del análisis se dibujaban fuera de vista. Copia por gráfico.
+function plotLayout(extra = {}) {
+  return structuredClone({ ...PLOTLY_LAYOUT, ...extra });
+}
+
 const State = {
   loaded: false,
   selectedFile: null,
@@ -151,7 +159,7 @@ async function loadDashboard() {
       [{ type: "pie", labels: cats.map((c) => c[0]), values: cats.map((c) => c[1]), hole: 0.5,
          marker: { colors: BRAND_COLORS, line: { color: "#ffffff", width: 2 } },
          textfont: { family: "Plus Jakarta Sans" } }],
-      { ...PLOTLY_LAYOUT, showlegend: true, legend: { orientation: "h", y: -0.1 } },
+      plotLayout({ showlegend: true, legend: { orientation: "h", y: -0.1 } }),
       PLOTLY_CONFIG
     );
 
@@ -161,7 +169,7 @@ async function loadDashboard() {
       [{ type: "bar", orientation: "h",
          x: ev.map((e) => e["A REPARTIR"]), y: ev.map((e) => e.ACTES),
          marker: { color: "#2c4a73", line: { width: 0 } } }],
-      { ...PLOTLY_LAYOUT, margin: { t: 20, r: 10, b: 40, l: 200 }, yaxis: { automargin: true, gridcolor: "rgba(0,0,0,0)" } },
+      plotLayout({ margin: { t: 20, r: 10, b: 40, l: 200 }, yaxis: { automargin: true, gridcolor: "rgba(0,0,0,0)" } }),
       PLOTLY_CONFIG
     );
   } catch (e) {
@@ -198,6 +206,12 @@ function bindWeightsPage() {
 
   $("#eq-eventos").addEventListener("change", updateEqDefaultBudget);
   $("#btn-equalize").addEventListener("click", runEqualize);
+
+  $("#joint-decimales").addEventListener("input", (e) => {
+    $("#joint-decimales-val").textContent = e.target.value;
+  });
+  $("#joint-eventos").addEventListener("change", updateJointDefaultBudget);
+  $("#btn-joint").addEventListener("click", runJointAdjust);
 }
 
 async function loadWeights() {
@@ -206,6 +220,7 @@ async function loadWeights() {
     renderWeightsTable();
     renderAutoEventos();
     renderEqEventos();
+    renderJointEventos();
     renderPreview(State.weights.preview);
   } catch (e) {
     toast(e.message, "error");
@@ -224,10 +239,11 @@ function renderWeightsTable() {
   const head = `<thead><tr><th>Acto</th>${CAT_COLS.map((c) => `<th class="num">${c}</th>`).join("")}</tr></thead>`;
   const body = rows
     .map((r, i) => {
-      const inputs = CAT_COLS.map((c) => {
-        const step = c === "A" ? "0.0001" : "0.001";
-        return `<td class="num"><input type="number" data-row="${i}" data-col="${c}" step="${step}" min="0" max="10" value="${r[c]}" /></td>`;
-      }).join("");
+      // step 0.0001 en todas: el ajuste conjunto escala B, C, D y E y el
+      // navegador redondea lo que muestra a la precisión del step.
+      const inputs = CAT_COLS.map(
+        (c) => `<td class="num"><input type="number" data-row="${i}" data-col="${c}" step="0.0001" min="0" max="10" value="${r[c]}" /></td>`
+      ).join("");
       return `<tr><td>${r.ACTES}</td>${inputs}</tr>`;
     })
     .join("");
@@ -356,6 +372,83 @@ async function runEqualize() {
     toast(e.message, "error");
   } finally {
     loading(false);
+  }
+}
+
+// ---- Ajuste conjunto (ponderaciones + presupuestos a la vez) ----
+function renderJointEventos() {
+  $("#joint-eventos").innerHTML = State.weights.non_official_events
+    .map((e) => `<option value="${escapeHtml(e)}">${escapeHtml(e)}</option>`)
+    .join("");
+}
+
+function selectedJointEvents() {
+  return Array.from($("#joint-eventos").selectedOptions).map((o) => o.value);
+}
+
+async function updateJointDefaultBudget() {
+  try {
+    const res = await API.defaultBudget(selectedJointEvents());
+    $("#joint-total").value = res.default_budget.toFixed(2);
+  } catch (e) {
+    /* silencioso */
+  }
+}
+
+async function runJointAdjust() {
+  const eventos = selectedJointEvents();
+  if (eventos.length < 2) {
+    toast("Selecciona al menos dos actos para ajustarlos a la vez.", "warning");
+    return;
+  }
+  const total = parseFloat($("#joint-total").value) || 0;
+  if (total <= 0) {
+    toast("Indica el presupuesto total a repartir.", "warning");
+    return;
+  }
+  const decimales = +$("#joint-decimales").value;
+  loading(true, "Ajustando ponderaciones y presupuestos…");
+  try {
+    const res = await API.jointAdjust(eventos, total, decimales);
+    State.weights.rows = res.rows;
+    renderWeightsTable();
+    renderPreview(res.preview);
+    renderJointResult(res);
+    toast("Ponderaciones y presupuestos ajustados.", "success");
+  } catch (e) {
+    toast(e.message, "error");
+  } finally {
+    loading(false);
+  }
+}
+
+function renderJointResult(res) {
+  const box = $("#joint-result");
+  const d = res.decimales;
+  const r = res.resumen;
+  let html = "";
+  if (res.cambios.length) {
+    const diffTotal = res.cambios.reduce((s, c) => s + c["Diff (€)"], 0);
+    const cobra = CAT_COLS.map((c) => `${c}: ${eur(r.pagos[c])}`).join(" · ");
+    html += `<div class="result-banner">${svgIcon("check")}<span>${res.cambios.length} acto(s) ajustados ·
+      Ponderación base A = ${num(r.A_base, d)} · B = ${num(r.B_base, d)} · Sin repartir = ${eur4(diffTotal)}</span></div>`;
+    html += `<div class="result-banner">${svgIcon("banknote")}<span>Cada músico cobra lo mismo en todos los actos —
+      ${cobra}</span></div>`;
+    html += '<div class="table-wrap"><table class="data-table" id="joint-result-table"></table></div>';
+    box.innerHTML = html;
+    UI.renderTable($("#joint-result-table"), [
+      { key: "Acto", label: "Acto" },
+      { key: "Asistentes", label: "Asist.", cls: "num" },
+      ...CAT_COLS.map((c) => ({ key: `${c} nuevo`, label: c, cls: "num", fmt: (v) => num(v, d) })),
+      { key: "Presupuesto anterior", label: "Presup. anterior", cls: "num", fmt: eur },
+      { key: "Presupuesto nuevo", label: "Presup. nuevo", cls: "num", fmt: eur },
+      { key: "Diff (€)", label: "Sin repartir", cls: "num", fmt: eur4 },
+    ], res.cambios);
+  } else {
+    box.innerHTML = "";
+  }
+  if (res.saltados.length) {
+    box.innerHTML += `<div class="result-banner warn">${svgIcon("alert")}<span>${res.saltados.length} acto(s) no ajustado(s): ${res.saltados.map((s) => `${escapeHtml(s.Acto)} (${escapeHtml(s.Motivo)})`).join("; ")}</span></div>`;
   }
 }
 
@@ -504,18 +597,22 @@ async function loadEventAnalysis(event) {
   try {
     const data = await API.eventAnalysis(event);
     const cats = data.categorias;
+    Plotly.purge("analysis-chart");
     if (cats.length) {
-      Plotly.newPlot(
-        "analysis-chart",
-        [{ type: "bar", x: cats.map((c) => c.Categoria), y: cats.map((c) => c.Count), marker: { color: "#2c4a73" } }],
-        { ...PLOTLY_LAYOUT },
-        PLOTLY_CONFIG
-      );
+      // La tabla se pinta ANTES que el gráfico: Plotly fija el ancho del SVG en
+      // el momento de dibujar, así que el contenedor debe tener ya su tamaño final.
       UI.renderTable($("#analysis-table"), [
         { key: "Categoria", label: "Categoría" },
         { key: "Count", label: "Cantidad", cls: "num" },
-        { key: "Musicians", label: "Músicos", fmt: (v) => (v || []).join(", ") },
+        { key: "Musicians", label: "Músicos", cls: "wrap", fmt: (v) => (v || []).join(", ") },
       ], cats);
+      Plotly.newPlot(
+        "analysis-chart",
+        [{ type: "bar", x: cats.map((c) => c.Categoria), y: cats.map((c) => c.Count),
+           marker: { color: BRAND_COLORS }, hovertemplate: "%{x}: %{y} músicos<extra></extra>" }],
+        plotLayout({ height: 320, xaxis: { type: "category", gridcolor: "rgba(0,0,0,0)" } }),
+        PLOTLY_CONFIG
+      );
     } else {
       $("#analysis-chart").innerHTML = "";
       $("#analysis-table").innerHTML = "<tbody><tr><td>No hay asistencia para este acto</td></tr></tbody>";

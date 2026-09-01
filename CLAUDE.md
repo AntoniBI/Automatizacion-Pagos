@@ -38,7 +38,7 @@ python tests/parity_check.py
 ```
 backend/                 Paquete Python (servidor + lógica de negocio)
   core.py                Motor de cálculo (MusicianPaymentSystem), sin UI
-  pricing.py             Ponderaciones automáticas e igualar presupuestos
+  pricing.py             Ponderaciones automáticas, igualar presupuestos y ajuste conjunto
   excel_export.py        Generación de los ficheros Excel de resultados
   server.py              API REST (FastAPI) + servido del frontend estático
 frontend/                Cliente web (servido en /static)
@@ -89,6 +89,17 @@ Importe individual = (A_REPARTIR_NETO / total_asistentes) × ponderación
 ```
 
 donde `A_REPARTIR_NETO` aplica la retención de banda configurada para el acto.
+
+### Ajuste conjunto de varios actos
+
+`ponderación A automática` despeja A por acto, así que un músico de categoría A
+cobra distinto en cada acto (A absorbe la composición del acto); B, C, D y E no,
+porque son las mismas en todos. Para que **todas** las categorías cobren lo mismo
+en varios actos sin dejar dinero sin repartir está `apply_ajuste_conjunto`: usa
+una ponderación base común y cada acto escala ese bloque completo por
+`N_asistentes / masa_base`, con el presupuesto fijado en proporción a esa masa.
+El precio: C/D/E dejan de ser 0,700/0,600/0,500 exactos en cada acto, pero la
+proporción entre categorías es idéntica en todos.
 
 ## Reglas al modificar
 

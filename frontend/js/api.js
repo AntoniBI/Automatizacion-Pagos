@@ -47,6 +47,8 @@ const API = (() => {
     autoA: (eventos, decimales) => request("POST", "/api/weights/auto-a", { eventos, decimales }),
     defaultBudget: (eventos) => request("POST", "/api/weights/default-budget", { eventos }),
     equalize: (eventos, presupuesto_total) => request("POST", "/api/weights/equalize", { eventos, presupuesto_total }),
+    jointAdjust: (eventos, presupuesto_total, decimales) =>
+      request("POST", "/api/weights/joint-adjust", { eventos, presupuesto_total, decimales }),
 
     getRetention: () => request("GET", "/api/retention"),
     putRetention: (rows) => request("PUT", "/api/retention", { rows }),

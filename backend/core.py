@@ -65,6 +65,23 @@ def _make_names_unique(names):
     return unicos, renombrados
 
 
+def _budget_cell(row, key):
+    """Valor de una columna de presupuesto tolerando el nombre exacto.
+
+    En los Excel reales la cabecera lleva coletillas ("TRANSPORT (Bus+Cotxes)"),
+    así que se acepta cualquier columna que empiece por el nombre buscado.
+    """
+    objetivo = _normalize_col(key)
+    for col in row.index:
+        nombre = _normalize_col(col)
+        if nombre == objetivo or nombre.startswith(objetivo + " "):
+            try:
+                return float(row[col])
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
 def _normalize_col(name):
     """Normaliza un nombre de columna: minúsculas, sin acentos, espacios colapsados."""
     s = unicodedata.normalize("NFKD", str(name)).encode("ascii", "ignore").decode()
@@ -824,6 +841,59 @@ class MusicianPaymentSystem:
 
         return changes_log, float(valor_unitario)
 
+    def apply_ajuste_conjunto(self, selected_events, target_total_budget, decimales=4):
+        """Ajusta ponderaciones y presupuestos de varios actos a la vez.
+
+        A diferencia de encadenar `apply_auto_ponderacion` + `apply_equalize_budgets`,
+        aquí cada categoría cobra lo mismo en todos los actos seleccionados
+        (también la A) y cada acto sigue repartiendo su presupuesto entero.
+
+        Devuelve (cambios, saltados, resumen).
+        """
+        from .pricing import calcular_ajuste_conjunto
+
+        cat_cols = ['A', 'B', 'C', 'D', 'E']
+        df_pond_idx = self.editing_weights.copy().set_index('ACTES')
+        factor_neto = {
+            e: 1 - self.get_band_retention_for_event(e) / 100
+            for e in selected_events
+        }
+
+        resultados, saltados, resumen = calcular_ajuste_conjunto(
+            df_asistencia=self.asistencia_df,
+            df_ponderaciones=df_pond_idx,
+            eventos=selected_events,
+            presupuesto_total=target_total_budget,
+            factor_neto=factor_neto,
+            categoria_col="Categoria",
+            decimales=decimales,
+        )
+
+        cambios = []
+        df_new = self.editing_weights.copy()
+        for info in resultados:
+            evento = info["Acto"]
+            mask = df_new['ACTES'] == evento
+            if not mask.any():
+                continue
+            for c in cat_cols:
+                df_new.loc[mask, c] = info["pesos"][c]
+
+            bmask = self.presupuesto_df['ACTES'] == evento
+            anterior = float(self.presupuesto_df.loc[bmask, 'A REPARTIR'].values[0]) if bmask.any() else 0.0
+            if bmask.any():
+                self.presupuesto_df.loc[bmask, 'A REPARTIR'] = info["Presupuesto nuevo"]
+
+            cambio = {k: v for k, v in info.items() if k != "pesos"}
+            cambio["Presupuesto anterior"] = anterior
+            cambios.append(cambio)
+
+        for c in cat_cols:
+            df_new[c] = df_new[c].astype(float)
+        self.editing_weights = df_new
+        self.configuracion_df = df_new.copy()
+        return cambios, saltados, resumen
+
     def get_default_budget_sum(self, selected_events):
         if not selected_events:
             return 0.0
@@ -1022,9 +1092,7 @@ class MusicianPaymentSystem:
         if not budget_info.empty:
             budget_row = budget_info.iloc[0]
             result["presupuesto"] = {
-                "COBRAT": float(budget_row['COBRAT']) if 'COBRAT' in budget_row else None,
-                "LLOGATS": float(budget_row['LLOGATS']) if 'LLOGATS' in budget_row else None,
-                "TRANSPORT": float(budget_row['TRANSPORT']) if 'TRANSPORT' in budget_row else None,
-                "A REPARTIR": float(budget_row['A REPARTIR']) if 'A REPARTIR' in budget_row else None,
+                key: _budget_cell(budget_row, key)
+                for key in ("COBRAT", "LLOGATS", "TRANSPORT", "A REPARTIR")
             }
         return result

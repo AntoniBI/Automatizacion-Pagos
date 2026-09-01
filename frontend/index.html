@@ -151,6 +151,7 @@
           <div class="tabs">
             <button class="tab active" data-tab="auto-a"><svg class="ico"><use href="#i-target"></use></svg> Ponderación A automática</button>
             <button class="tab" data-tab="equalize"><svg class="ico"><use href="#i-scale"></use></svg> Igualar presupuestos</button>
+            <button class="tab" data-tab="joint"><svg class="ico"><use href="#i-zap"></use></svg> Ajuste conjunto</button>
           </div>
 
           <div class="tab-panel" data-panel="auto-a">
@@ -183,6 +184,28 @@
             </div>
             <button id="btn-equalize" class="btn btn-primary"><svg class="ico"><use href="#i-zap"></use></svg> Calcular y aplicar</button>
             <div id="eq-result"></div>
+          </div>
+
+          <div class="tab-panel hidden" data-panel="joint">
+            <p class="muted">Ajusta <b>ponderaciones y presupuestos a la vez</b> en los actos seleccionados: todas
+              las categorías (también la <b>A</b>) cobran lo mismo en todos ellos y cada acto sigue repartiendo su
+              presupuesto entero. Se calcula una ponderación base común y cada acto escala ese bloque completo
+              (A, B, C, D y E) según sus asistentes, así que C/D/E no se quedan en 0,700/0,600/0,500 exactos pero la
+              proporción entre categorías es idéntica en todos los actos.</p>
+            <label class="block">Actos a ajustar
+              <select id="joint-eventos" multiple size="8" class="multiselect"></select>
+            </label>
+            <div class="form-row">
+              <label>Presupuesto total a repartir (€)
+                <input type="number" id="joint-total" min="0" step="100" value="0" />
+              </label>
+              <label>Decimales
+                <input type="range" id="joint-decimales" min="2" max="6" value="4" step="1" />
+                <span id="joint-decimales-val" class="pill">4</span>
+              </label>
+            </div>
+            <button id="btn-joint" class="btn btn-primary"><svg class="ico"><use href="#i-zap"></use></svg> Calcular y aplicar</button>
+            <div id="joint-result"></div>
           </div>
         </div>
 
