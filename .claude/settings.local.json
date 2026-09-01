@@ -58,7 +58,15 @@
       "PowerShell(powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\\\Users\\\\Antoni\\\\Documents\\\\GitHub\\\\AutomatCobro2\\\\crear_acceso_directo.ps1\"; if \\(Test-Path \"$\\([Environment]::GetFolderPath\\('Desktop'\\)\\)\\\\Cobro Musical.lnk\"\\) { Write-Host \"VERIFICADO: el acceso directo existe.\" })",
       "Bash(rm -rf __pycache__ backend/__pycache__)",
       "Bash(rm -f frontend/assets/_check_ico.png)",
-      "Bash(mv frontend/assets/app.ico frontend/assets/escudo.ico)"
+      "Bash(mv frontend/assets/app.ico frontend/assets/escudo.ico)",
+      "PowerShell(git *)",
+      "PowerShell(python -c \"import pytest, openpyxl; print\\(pytest.__version__, openpyxl.__version__\\)\")",
+      "PowerShell(python tests/test_xec_column.py)",
+      "PowerShell(python tests/test_xec_column.py; python tests/parity_check.py)",
+      "PowerShell($env:PYTHONIOENCODING = 'utf-8'; python tests/parity_check.py)",
+      "PowerShell(python -m uvicorn backend.server:app --port 8001)",
+      "PowerShell(python -c \"import requests; print\\(requests.__version__\\)\")",
+      "PowerShell($env:PYTHONIOENCODING = 'utf-8'; python \"C:\\\\Users\\\\Antoni\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-Antoni-Documents-GitHub-AutomatCobro2\\\\288f3e42-18dd-442e-8670-31f8b194d75d\\\\scratchpad\\\\drive_xec.py\")"
     ]
   }
 }

@@ -86,6 +86,7 @@
         <button class="nav-item" data-page="retention"><svg class="ico"><use href="#i-bank"></use></svg> Retención Banda</button>
         <button class="nav-item" data-page="analysis"><svg class="ico"><use href="#i-calendar"></use></svg> Análisis por Actos</button>
         <button class="nav-item" data-page="process"><svg class="ico"><use href="#i-cog"></use></svg> Procesar y Descargar</button>
+        <button class="nav-item" data-page="cheques"><svg class="ico"><use href="#i-banknote"></use></svg> Cheques</button>
       </nav>
 
       <div class="sidebar-foot">v2 · FastAPI</div>
@@ -304,11 +305,95 @@
 
           <div class="card">
             <h3><svg class="ico"><use href="#i-download"></use></svg> Descargar Resultados</h3>
+            <div class="form-row">
+              <label>Primer Nº de cheque <span class="muted">(opcional, columna "Nª Xec" en Resumen_Musicos)</span>
+                <input type="number" id="xec-start" min="0" step="1" placeholder="Ej. 1250" />
+              </label>
+              <label>Numeración
+                <select id="xec-dir">
+                  <option value="asc" selected>Ascendente</option>
+                  <option value="desc">Descendente</option>
+                </select>
+              </label>
+            </div>
             <div class="btn-row">
               <button id="btn-export-full" class="btn btn-primary"><svg class="ico"><use href="#i-download"></use></svg> Excel Completo</button>
               <button id="btn-export-basic" class="btn btn-ghost"><svg class="ico"><use href="#i-file"></use></svg> Excel Básico</button>
             </div>
           </div>
+        </div>
+      </section>
+
+      <!-- ===== CHEQUES ===== -->
+      <section id="page-cheques" class="page hidden">
+        <div class="page-head">
+          <h1 class="page-title">Generar Cheques (PDF)</h1>
+          <p class="page-sub">Sube el Excel de resultados <b>ya editado</b> (con tus ajustes y la columna <b>Total Truncado</b> en la hoja <b>Resumen_Músicos</b>) y genera un PDF calibrado para imprimir sobre el papel de pagarés (20 × 30,4 cm, 4 cheques por hoja).</p>
+        </div>
+
+        <div class="card">
+          <h3><svg class="ico"><use href="#i-file"></use></svg> 1 · Excel editado</h3>
+          <div id="chq-dropzone" class="dropzone">
+            <svg class="ico ico-lg"><use href="#i-upload"></use></svg>
+            <p>Arrastra aquí el Excel editado o haz clic para elegirlo</p>
+            <input type="file" id="chq-file-input" accept=".xlsx,.xls" hidden />
+          </div>
+          <div id="chq-file-meta" class="file-meta hidden"></div>
+        </div>
+
+        <div id="chq-preview-card" class="card hidden">
+          <h3><svg class="ico"><use href="#i-banknote"></use></svg> 2 · Cheques detectados</h3>
+          <div class="metrics-grid metrics-3" id="chq-metrics"></div>
+          <div class="table-wrap"><table id="chq-preview-table" class="data-table"></table></div>
+        </div>
+
+        <div id="chq-form-card" class="card hidden">
+          <h3><svg class="ico"><use href="#i-calendar"></use></svg> 3 · Datos de emisión</h3>
+          <div class="form-row">
+            <label>Fecha de emisión (para todos los cheques)
+              <input type="date" id="chq-fecha" />
+            </label>
+            <label>Nº de serie del primer cheque <span class="muted">(opcional)</span>
+              <input type="text" id="chq-serie" placeholder="ej. 1.125.267" />
+            </label>
+          </div>
+          <p class="muted note"><svg class="ico"><use href="#i-info"></use></svg><span>La serie está preimpresa en el papel; si la indicas, se calcula el resto y se añade un listado de control al final del PDF. La opción del <b>dorso</b> está abajo, en Calibración.</span></p>
+          <div class="btn-row">
+            <button id="btn-chq-pdf" class="btn btn-primary btn-lg"><svg class="ico"><use href="#i-download"></use></svg> Generar PDF de cheques</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3><svg class="ico"><use href="#i-sliders"></use></svg> Calibración</h3>
+          <p class="muted">Imprime la hoja de prueba sobre un cheque en blanco (a <b>tamaño real / 100%</b>) y comprueba que cada dato cae en su hueco. Si hay desfase, ajústalo aquí: los cambios se guardan en este navegador y se aplican tanto a la prueba como a los cheques.</p>
+
+          <h4 class="sub-h">Desplazamiento global (mm)</h4>
+          <p class="muted note"><svg class="ico"><use href="#i-info"></use></svg><span>Úsalo si <b>todo</b> el texto sale corrido igual. X+ mueve a la derecha · Y+ mueve hacia abajo.</span></p>
+          <div class="form-row">
+            <label>Offset X (mm)<input type="number" id="cal-offset-x" step="0.5" value="0" /></label>
+            <label>Offset Y (mm)<input type="number" id="cal-offset-y" step="0.5" value="0" /></label>
+          </div>
+
+          <h4 class="sub-h">Deriva por cheque (mm)</h4>
+          <p class="muted note"><svg class="ico"><use href="#i-info"></use></svg><span>Úsala si el texto se va <b>corriendo poco a poco</b> de un cheque al siguiente. Es lo que se suma a cada cheque respecto al anterior (el 1º = 0, el 2º = 1×, el 3º = 2×, el 4º = 3×). X+ = derecha · Y+ = abajo. Ej.: si el 4º cheque sale 3&nbsp;mm bajo y el 1º bien, pon Y = −1.</span></p>
+          <div class="form-row">
+            <label>Deriva X (mm/cheque)<input type="number" id="cal-drift-x" step="0.5" value="0" /></label>
+            <label>Deriva Y (mm/cheque)<input type="number" id="cal-drift-y" step="0.5" value="0" /></label>
+          </div>
+
+          <h4 class="sub-h">Posición por campo (mm desde la esquina superior izquierda del cheque)</h4>
+          <div class="table-wrap"><table id="cal-fields-table" class="data-table"></table></div>
+
+          <h4 class="sub-h">Dorso (copia autocopiable)</h4>
+          <label class="check"><input type="checkbox" id="chq-dorso" /> <span>Imprimir el nombre del músico en el <b>dorso</b> (impresión a doble cara)</span></label>
+          <p class="muted note"><svg class="ico"><use href="#i-info"></use></svg><span>Genera una cara trasera por cada hoja. Imprime el PDF a <b>doble cara, volteando por el lado largo</b>, para que el nombre quede detrás de cada cheque. Afecta al cheque de ejemplo, a la página de calibración y a los cheques reales.</span></p>
+
+          <div class="btn-row">
+            <button id="btn-chq-calib" class="btn btn-primary"><svg class="ico"><use href="#i-file"></use></svg> Descargar página de calibración</button>
+            <button id="btn-chq-ejemplo" class="btn btn-ghost"><svg class="ico"><use href="#i-banknote"></use></svg> Descargar cheque de ejemplo</button>
+            <button id="btn-cal-reset" class="btn btn-ghost"><svg class="ico"><use href="#i-refresh"></use></svg> Restablecer valores</button>
+          </div>
+          <p class="muted note"><svg class="ico"><use href="#i-info"></use></svg><span><b>Cheque de ejemplo:</b> genera cheques con nombres e importes de muestra (respeta tu calibración, la fecha y el dorso) para imprimir sobre un cheque y comprobar que todo cae en su sitio.</span></p>
         </div>
       </section>
     </main>

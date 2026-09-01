@@ -27,10 +27,11 @@ const State = {
 // ============================================================
 // Router
 // ============================================================
-const PAGES = ["dashboard", "weights", "retention", "analysis", "process"];
+const PAGES = ["dashboard", "weights", "retention", "analysis", "process", "cheques"];
 
 function showPage(page) {
-  if (!State.loaded) {
+  // La página de Cheques es autónoma (re-sube su propio Excel), no exige sesión cargada.
+  if (!State.loaded && page !== "cheques") {
     PAGES.forEach((p) => $(`#page-${p}`).classList.add("hidden"));
     $("#no-data").classList.remove("hidden");
     return;
@@ -48,6 +49,7 @@ function loadPage(page) {
     retention: loadRetention,
     analysis: loadAnalysis,
     process: () => {}, // se carga al procesar
+    cheques: () => {}, // se gestiona con sus propios eventos
   };
   (loaders[page] || (() => {}))();
 }
@@ -62,6 +64,7 @@ async function init() {
   bindRetentionPage();
   bindAnalysisPage();
   bindProcessPage();
+  bindChequesPage();
   UI.initTabs(document);
 
   try {
@@ -619,7 +622,259 @@ function renderProcessResults(res) {
 }
 
 function download(kind) {
-  window.location.href = API.exportUrl(kind);
+  let params = null;
+  if (kind === "full") {
+    const start = $("#xec-start").value.trim();
+    if (start !== "") {
+      if (!/^\d+$/.test(start)) {
+        toast("El primer Nº de cheque debe ser un número entero positivo.", "error");
+        return;
+      }
+      params = { xec_start: start, xec_dir: $("#xec-dir").value };
+    }
+  }
+  window.location.href = API.exportUrl(kind, params);
+}
+
+// ============================================================
+// Cheques (PDF)
+// ============================================================
+const Cheques = { file: null, cal: null, defaults: null };
+const CAL_STORAGE_KEY = "chq_calibration";
+
+function bindChequesPage() {
+  const dz = $("#chq-dropzone");
+  const input = $("#chq-file-input");
+  dz.addEventListener("click", () => input.click());
+  dz.addEventListener("dragover", (e) => { e.preventDefault(); dz.classList.add("drag"); });
+  dz.addEventListener("dragleave", () => dz.classList.remove("drag"));
+  dz.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dz.classList.remove("drag");
+    if (e.dataTransfer.files.length) selectChequeFile(e.dataTransfer.files[0]);
+  });
+  input.addEventListener("change", () => {
+    if (input.files.length) selectChequeFile(input.files[0]);
+  });
+
+  // Fecha por defecto: hoy
+  $("#chq-fecha").value = new Date().toISOString().slice(0, 10);
+
+  $("#btn-chq-pdf").addEventListener("click", generateChequesPdf);
+  $("#btn-chq-calib").addEventListener("click", downloadCalibration);
+  $("#btn-chq-ejemplo").addEventListener("click", downloadEjemplo);
+  $("#btn-cal-reset").addEventListener("click", resetCalibration);
+  $("#cal-offset-x").addEventListener("input", (e) => {
+    Cheques.cal.offset_x = parseFloat(e.target.value) || 0;
+    saveStoredCal();
+  });
+  $("#cal-offset-y").addEventListener("input", (e) => {
+    Cheques.cal.offset_y = parseFloat(e.target.value) || 0;
+    saveStoredCal();
+  });
+  $("#cal-drift-x").addEventListener("input", (e) => {
+    Cheques.cal.drift_x = parseFloat(e.target.value) || 0;
+    saveStoredCal();
+  });
+  $("#cal-drift-y").addEventListener("input", (e) => {
+    Cheques.cal.drift_y = parseFloat(e.target.value) || 0;
+    saveStoredCal();
+  });
+
+  initChequesCalibration();
+}
+
+// ---- Calibración (persistida en localStorage) ----
+function cloneCal(d) {
+  return {
+    offset_x: d.offset_x || 0,
+    offset_y: d.offset_y || 0,
+    drift_x: d.drift_x || 0,
+    drift_y: d.drift_y || 0,
+    fields: Object.fromEntries(
+      Object.entries(d.fields || {}).map(([k, v]) => [k, { x: v.x, y: v.y, size: v.size }])
+    ),
+  };
+}
+
+function buildCal(defaults, stored) {
+  const base = cloneCal(defaults);
+  if (!stored) return base;
+  if (stored.offset_x != null) base.offset_x = stored.offset_x;
+  if (stored.offset_y != null) base.offset_y = stored.offset_y;
+  if (stored.drift_x != null) base.drift_x = stored.drift_x;
+  if (stored.drift_y != null) base.drift_y = stored.drift_y;
+  Object.keys(base.fields).forEach((k) => {
+    const sf = stored.fields && stored.fields[k];
+    if (sf) {
+      if (sf.x != null) base.fields[k].x = sf.x;
+      if (sf.y != null) base.fields[k].y = sf.y;
+      if (sf.size != null) base.fields[k].size = sf.size;
+    }
+  });
+  return base;
+}
+
+function loadStoredCal() {
+  try {
+    const s = localStorage.getItem(CAL_STORAGE_KEY);
+    return s ? JSON.parse(s) : null;
+  } catch (_) { return null; }
+}
+
+function saveStoredCal() {
+  try { localStorage.setItem(CAL_STORAGE_KEY, JSON.stringify(Cheques.cal)); } catch (_) {}
+}
+
+async function initChequesCalibration() {
+  let defaults;
+  try {
+    defaults = await API.chequesCalibDefaults();
+  } catch (e) {
+    defaults = { offset_x: 0, offset_y: 0, fields: {}, labels: {} };
+  }
+  Cheques.defaults = defaults;
+  Cheques.cal = buildCal(defaults, loadStoredCal());
+  syncCalInputs();
+  renderCalFields();
+}
+
+function syncCalInputs() {
+  $("#cal-offset-x").value = Cheques.cal.offset_x;
+  $("#cal-offset-y").value = Cheques.cal.offset_y;
+  $("#cal-drift-x").value = Cheques.cal.drift_x;
+  $("#cal-drift-y").value = Cheques.cal.drift_y;
+}
+
+function renderCalFields() {
+  const f = Cheques.cal.fields;
+  const labels = (Cheques.defaults && Cheques.defaults.labels) || {};
+  const keys = Object.keys(f);
+  const head = `<thead><tr><th>Campo</th><th class="num">X (mm)</th><th class="num">Y (mm)</th><th class="num">Tamaño (pt)</th></tr></thead>`;
+  const body = keys.map((k) => {
+    const v = f[k];
+    return `<tr><td>${escapeHtml(labels[k] || k)}</td>
+      <td class="num"><input type="number" step="0.5" data-key="${k}" data-prop="x" value="${v.x}" /></td>
+      <td class="num"><input type="number" step="0.5" data-key="${k}" data-prop="y" value="${v.y}" /></td>
+      <td class="num"><input type="number" step="1" min="6" data-key="${k}" data-prop="size" value="${v.size}" /></td>
+    </tr>`;
+  }).join("");
+  const table = $("#cal-fields-table");
+  table.innerHTML = head + `<tbody>${body}</tbody>`;
+  table.querySelectorAll("input").forEach((inp) =>
+    inp.addEventListener("input", () => {
+      Cheques.cal.fields[inp.dataset.key][inp.dataset.prop] = parseFloat(inp.value) || 0;
+      saveStoredCal();
+    })
+  );
+}
+
+function resetCalibration() {
+  Cheques.cal = cloneCal(Cheques.defaults);
+  try { localStorage.removeItem(CAL_STORAGE_KEY); } catch (_) {}
+  syncCalInputs();
+  renderCalFields();
+  toast("Calibración restablecida a los valores por defecto.", "success");
+}
+
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadCalibration() {
+  loading(true, "Generando hoja de calibración…");
+  try {
+    const blob = await API.chequesCalibPdf(Cheques.cal, $("#chq-dorso").checked);
+    triggerDownload(blob, "cheques_calibracion.pdf");
+  } catch (e) {
+    toast(e.message, "error");
+  } finally {
+    loading(false);
+  }
+}
+
+async function downloadEjemplo() {
+  loading(true, "Generando cheque de ejemplo…");
+  try {
+    const blob = await API.chequesEjemplo({
+      fecha: $("#chq-fecha").value || undefined,
+      serie_inicial: $("#chq-serie").value.trim() || undefined,
+      calibration: Cheques.cal,
+      incluir_dorso: $("#chq-dorso").checked,
+    });
+    triggerDownload(blob, "cheques_ejemplo.pdf");
+  } catch (e) {
+    toast(e.message, "error");
+  } finally {
+    loading(false);
+  }
+}
+
+async function selectChequeFile(file) {
+  Cheques.file = file;
+  $("#chq-file-meta").classList.remove("hidden");
+  $("#chq-file-meta").innerHTML = `${svgIcon("file")} <b>${escapeHtml(file.name)}</b><br><span class="muted">${(file.size / 1024).toFixed(1)} KB</span>`;
+  loading(true, "Leyendo importes del Excel…");
+  try {
+    const res = await API.chequesPreview(file);
+    renderChequesPreview(res);
+    $("#chq-preview-card").classList.remove("hidden");
+    $("#chq-form-card").classList.remove("hidden");
+    if (res.info.warnings && res.info.warnings.length) {
+      res.info.warnings.forEach((w) => toast(w, "warning"));
+    }
+  } catch (e) {
+    Cheques.file = null;
+    $("#chq-preview-card").classList.add("hidden");
+    $("#chq-form-card").classList.add("hidden");
+    toast(e.message, "error");
+  } finally {
+    loading(false);
+  }
+}
+
+function renderChequesPreview(res) {
+  $("#chq-metrics").innerHTML = `
+    ${metricCard("banknote", "Cheques a generar", res.count)}
+    ${metricCard("wallet", "Importe total", eur(res.total))}
+    ${metricCard("file", "Hoja / columna", `${escapeHtml(res.info.sheet)} · ${escapeHtml(res.info.amount_col)}`)}
+  `;
+  UI.renderTable($("#chq-preview-table"), [
+    { key: "nombre", label: "Músico" },
+    { key: "importe", label: "Importe (€)", cls: "num" },
+    { key: "letras", label: "En letra (valencià)" },
+  ], res.items);
+}
+
+async function generateChequesPdf() {
+  if (!Cheques.file) {
+    toast("Sube primero el Excel editado.", "warning");
+    return;
+  }
+  const fecha = $("#chq-fecha").value;
+  if (!fecha) {
+    toast("Indica la fecha de emisión.", "warning");
+    return;
+  }
+  const serie = $("#chq-serie").value.trim();
+  loading(true, "Generando PDF de cheques…");
+  try {
+    const incluirDorso = $("#chq-dorso").checked;
+    const blob = await API.chequesPdf(Cheques.file, fecha, serie, Cheques.cal, incluirDorso);
+    triggerDownload(blob, "cheques.pdf");
+    toast("PDF de cheques generado.", "success");
+  } catch (e) {
+    toast(e.message, "error");
+  } finally {
+    loading(false);
+  }
 }
 
 // ============================================================

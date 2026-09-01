@@ -384,6 +384,13 @@ input[type="range"] { vertical-align: middle; accent-color: var(--brand); }
 .radio:hover { border-color: var(--border-strong); background: var(--surface-2); }
 .radio input { accent-color: var(--brand); }
 .radio:has(input:checked) { border-color: var(--brand-line); background: var(--brand-soft); }
+.check {
+  display: flex; align-items: center; gap: 10px; color: var(--text); cursor: pointer;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; margin: 10px 0; transition: 0.15s var(--ease);
+}
+.check:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.check input { accent-color: var(--brand); }
+.check:has(input:checked) { border-color: var(--brand-line); background: var(--brand-soft); }
 .penalty-config { background: var(--bg-2); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin: 16px 0; }
 
 /* ============================================================

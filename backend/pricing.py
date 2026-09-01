@@ -46,6 +46,10 @@ def calcular_ponderaciones_automaticas(
         # 1) Acto oficial -> saltar
         if evento in df_ponderaciones.index:
             current_row = df_ponderaciones.loc[evento]
+            # Si el acto aparece repetido en la configuración, .loc devuelve un
+            # DataFrame; nos quedamos con la primera fila para no romper.
+            if getattr(current_row, "ndim", 1) > 1:
+                current_row = current_row.iloc[0]
             if all(float(current_row.get(c, 0) or 0) == 0 for c in categorias):
                 resultados[evento] = {
                     "skipped": True,
@@ -96,7 +100,7 @@ def calcular_ponderaciones_automaticas(
             continue
 
         # 3) Mantener B actual
-        w_B = float(df_ponderaciones.loc[evento, 'B'])
+        w_B = float(current_row['B'])
 
         # 4) Despejar A
         w_A_exacto = (
@@ -107,7 +111,7 @@ def calcular_ponderaciones_automaticas(
 
         resultados[evento] = {
             "skipped": False,
-            "A_anterior": float(df_ponderaciones.loc[evento, 'A']),
+            "A_anterior": float(current_row['A']),
             "A_nuevo": w_A_truncado,
             "A_exacto": w_A_exacto,
             "B": w_B,
@@ -147,7 +151,17 @@ def calcular_presupuestos_iguales(
     """
     # Asegurar que ponderaciones y categorías coincidan
     df_ponderaciones = df_ponderaciones[categorias].copy()
-    
+
+    # Ignorar los actos que no existen en las dos hojas: si se colaran, su masa
+    # sería 0 y el reparto les asignaría un presupuesto de 0 €.
+    eventos = [e for e in eventos
+               if e in df_asistencia.columns and e in df_ponderaciones.index]
+    if not eventos:
+        raise ValueError(
+            "Ninguno de los actos seleccionados existe a la vez en Asistencia y "
+            "en Configuración de Precios."
+        )
+
     # Calcular la "masa ponderada" de cada evento
     masas = {}
     for evento in eventos:
